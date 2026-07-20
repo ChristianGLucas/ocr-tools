@@ -1,0 +1,26 @@
+# Runtime deps, fully pinned for deterministic builds. All permissive.
+# The OCR engine itself (RapidOCR / PP-OCRv4 ONNX, Apache-2.0) is VENDORED under
+# vendor/rapidocr_onnxruntime (see vendor/rapidocr_onnxruntime/LICENSE.txt) rather
+# than pulled from PyPI — this drops RapidOCR's unused tqdm dependency (MPL-2.0,
+# never imported) and lets us pin opencv-python-headless instead of the GUI build.
+#
+# Full license audit of this closure:
+#   onnxruntime             MIT
+#   opencv-python-headless  Apache-2.0
+#   numpy                   BSD-3-Clause (and 0BSD/MIT/Zlib/CC0 for vendored bits)
+#   pyclipper               MIT
+#   shapely                 BSD-3-Clause
+#   Pillow                  HPND (MIT-CMU)
+#   PyYAML                  MIT
+#   six                     MIT
+#   protobuf                BSD-3-Clause   (pulled by onnxruntime)
+#   flatbuffers             Apache-2.0     (pulled by onnxruntime)
+#   packaging               Apache-2.0 OR BSD-2-Clause (pulled by onnxruntime)
+onnxruntime==1.27.0
+opencv-python-headless==5.0.0.93
+numpy==2.5.1
+pyclipper==1.4.0
+shapely==2.1.2
+Pillow==12.3.0
+PyYAML==6.0.3
+six==1.17.0

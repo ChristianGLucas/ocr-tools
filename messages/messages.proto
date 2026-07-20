@@ -1,0 +1,116 @@
+// Data contracts for christiangeorgelucas/ocr-tools — stateless optical
+// character recognition wrapping the Apache-2.0 RapidOCR / PP-OCRv4 ONNX engine.
+//
+// COMPOSABILITY. Every node consumes the single canonical `Image` envelope,
+// which is structurally identical to christiangeorgelucas/image-tools' `Image`
+// (same fields, same numbers, same INPUT-ONLY `url`). That makes an image-tools
+// node's `Image` output map field-for-field onto an ocr-tools node's input, so
+// image preprocessing (Load / Convert / Resize) flows straight into OCR.
+//
+// COORDINATES. All bounding boxes are in PIXELS with the origin at the
+// TOP-LEFT of the image (the raster convention RapidOCR uses). Note this
+// differs from christiangeorgelucas/pdf-tools, whose boxes are in PDF points
+// with the origin BOTTOM-LEFT — deliberately not homogenized, because the two
+// operate on different media.
+
+syntax = "proto3";
+
+package christiangeorgelucas.ocr_tools;
+
+// The canonical input image. Provide either inline `data` (raw encoded image
+// bytes) or, when `data` is empty, a `url` to fetch. `format`, `width`, and
+// `height` are optional informational hints and are ignored by decoding — the
+// image format and dimensions are read from the bytes themselves.
+message Image {
+  // Raw image bytes (base64-encoded over the JSON bridge). PNG/JPEG/BMP/TIFF/
+  // WEBP/GIF are decoded. Hard cap of 20 MB applies before decoding.
+  bytes data = 1;
+  // Informational encoding hint (e.g. "PNG"). Not required; ignored by decode.
+  string format = 2;
+  // Informational width hint in pixels. Not required; ignored by decode.
+  int32 width = 3;
+  // Informational height hint in pixels. Not required; ignored by decode.
+  int32 height = 4;
+  // INPUT-ONLY. When `data` is empty, the node fetches the image from this
+  // http/https URL. The fetch is SSRF-guarded (public hosts only) and capped
+  // at 20 MB.
+  string url = 5;
+}
+
+// A point in pixel coordinates, origin top-left.
+message Point {
+  // X (horizontal) offset in pixels from the left edge.
+  double x = 1;
+  // Y (vertical) offset in pixels from the top edge.
+  double y = 2;
+}
+
+// One detected and recognized line of text with its geometry and confidence.
+message TextLine {
+  // The recognized text of this line.
+  string text = 1;
+  // Recognition confidence in [0, 1]; higher is more certain.
+  double confidence = 2;
+  // Left edge (min x) of the axis-aligned bounding box, in pixels.
+  double x0 = 3;
+  // Top edge (min y) of the axis-aligned bounding box, in pixels.
+  double y0 = 4;
+  // Right edge (max x) of the axis-aligned bounding box, in pixels.
+  double x1 = 5;
+  // Bottom edge (max y) of the axis-aligned bounding box, in pixels.
+  double y1 = 6;
+  // The raw detection quadrilateral (4 points, clockwise from the top-left
+  // corner). Preserved because detected text may be rotated or skewed, so the
+  // exact polygon carries more than the axis-aligned box.
+  repeated Point quad = 7;
+}
+
+// Full OCR result: recognized text plus per-line geometry and confidence.
+message OcrResult {
+  // All recognized lines joined in reading order, one per line ('\n'-separated).
+  string text = 1;
+  // The recognized lines, each with its bounding box, quad, and confidence,
+  // in RapidOCR's detection order (top-to-bottom, left-to-right).
+  repeated TextLine lines = 2;
+  // Mean recognition confidence across all lines, in [0, 1]; 0 when no text.
+  double mean_confidence = 3;
+  // Number of recognized lines (== length of `lines`).
+  int32 line_count = 4;
+  // Structured error message; empty on success. Set instead of raising on
+  // malformed, oversized, or unfetchable input.
+  string error = 5;
+}
+
+// Plain-text-only OCR output — a clean edge into text / NLP nodes downstream.
+message TextOut {
+  // All recognized text joined in reading order ('\n'-separated). Empty when
+  // no text is found.
+  string text = 1;
+  // Structured error message; empty on success.
+  string error = 2;
+}
+
+// A detected text region (geometry only, no recognition).
+message Region {
+  // Left edge (min x) of the axis-aligned bounding box, in pixels.
+  double x0 = 1;
+  // Top edge (min y) of the axis-aligned bounding box, in pixels.
+  double y0 = 2;
+  // Right edge (max x) of the axis-aligned bounding box, in pixels.
+  double x1 = 3;
+  // Bottom edge (max y) of the axis-aligned bounding box, in pixels.
+  double y1 = 4;
+  // The raw detection quadrilateral (4 points, clockwise from the top-left).
+  repeated Point quad = 5;
+}
+
+// Detected text regions with no recognition performed — a fast "where is the
+// text" pass for layout analysis, cropping, or routing.
+message RegionsOut {
+  // Detected regions in RapidOCR's detection order.
+  repeated Region regions = 1;
+  // Number of regions (== length of `regions`).
+  int32 count = 2;
+  // Structured error message; empty on success.
+  string error = 3;
+}
