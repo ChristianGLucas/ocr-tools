@@ -168,7 +168,7 @@ def _fetch(url: str) -> bytes:
             resp = conn.getresponse()
             if resp.status in (301, 302, 303, 307, 308):
                 loc = resp.getheader("Location")
-                resp.read()
+                resp.read(_MAX_BYTES + 1)  # drain, bounded
                 if not loc:
                     raise OcrError("redirect without a Location header")
                 current = urljoin(current, loc)
