@@ -39,7 +39,10 @@ origin — the two operate on different media and are deliberately not unified.
   decompression-bomb image is rejected without allocating its pixels).
 - **SSRF-guarded fetch.** When you pass a `url`, the fetch rejects non-http(s)
   schemes and any host resolving to a private, loopback, link-local, reserved,
-  multicast, or unspecified address.
+  multicast, or unspecified address. The check is re-run on **every redirect
+  hop**, and each request connects to the exact validated IP — so an open
+  redirector or a DNS-rebinding flip cannot steer the fetch to an internal
+  address.
 - **No crashes.** Malformed, oversized, or unfetchable input returns a
   structured `error` field, never an exception.
 

@@ -10,13 +10,14 @@ The engine (three bundled ONNX models) is expensive to construct, so it is built
 once and cached. It is read-only and holds no per-call state, so every node
 invocation remains a pure function of its input.
 """
+import http.client
 import io
 import ipaddress
 import os
 import socket
+import ssl
 import sys
-import urllib.request
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import numpy as np
 from PIL import Image as PILImage
@@ -40,6 +41,8 @@ _MAX_BYTES = 20 * 1024 * 1024
 _MAX_PIXELS = 40_000_000
 # Timeout for a URL fetch, in seconds.
 _FETCH_TIMEOUT = 20
+# Max redirect hops to follow (each re-validated).
+_MAX_REDIRECTS = 5
 
 # Also clamp Pillow's own decompression-bomb guard to our stricter cap.
 PILImage.MAX_IMAGE_PIXELS = _MAX_PIXELS
@@ -75,13 +78,15 @@ def _is_disallowed_ip(ip: str) -> bool:
     )
 
 
-def _fetch(url: str) -> bytes:
-    """Fetch an image from an http/https URL with an SSRF guard and a size cap.
+def _validate_url(url: str):
+    """Validate a URL for fetching and resolve it to a safe, pinned IP.
 
     Rejects non-http(s) schemes and any host that resolves to a private,
-    loopback, link-local, reserved, multicast, or unspecified address — so the
-    caller cannot use the `url` field to reach cloud metadata endpoints or
-    internal services. Reads at most `_MAX_BYTES`.
+    loopback, link-local, reserved, multicast, or unspecified address. Returns
+    (scheme, host, port, ip) where `ip` is a validated address we then connect
+    to DIRECTLY — so the address checked is the address contacted, closing the
+    DNS-rebinding window. Called on the initial URL AND on every redirect hop.
+    Raises OcrError on anything disallowed.
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
@@ -89,25 +94,98 @@ def _fetch(url: str) -> bytes:
     host = parsed.hostname
     if not host:
         raise OcrError("url has no host")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
     try:
-        infos = socket.getaddrinfo(host, parsed.port or 80, proto=socket.IPPROTO_TCP)
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except socket.gaierror:
         raise OcrError("could not resolve url host")
+    pinned = None
     for info in infos:
-        ip = info[4][0]
-        if _is_disallowed_ip(ip):
+        cand = info[4][0]
+        if _is_disallowed_ip(cand):
             raise OcrError("url host resolves to a non-public address")
-    req = urllib.request.Request(url, headers={"User-Agent": "axiom-ocr-tools/0.1"})
-    try:
-        with urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT) as resp:  # noqa: S310
+        if pinned is None:
+            pinned = cand
+    if pinned is None:
+        raise OcrError("could not resolve url host")
+    return parsed.scheme, host, port, pinned
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    """HTTPConnection that dials a pre-validated IP instead of re-resolving the
+    host (so the address we vetted is the address we actually contact)."""
+
+    def __init__(self, host, pinned_ip, **kwargs):
+        super().__init__(host, **kwargs)
+        self._pinned_ip = pinned_ip
+
+    def connect(self):
+        self.sock = socket.create_connection((self._pinned_ip, self.port), self.timeout)
+        if self._tunnel_host:
+            self._tunnel()
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPSConnection that dials a pre-validated IP while still using the
+    original hostname for TLS SNI and certificate verification."""
+
+    def __init__(self, host, pinned_ip, *, context, **kwargs):
+        super().__init__(host, context=context, **kwargs)
+        self._pinned_ip = pinned_ip
+
+    def connect(self):
+        sock = socket.create_connection((self._pinned_ip, self.port), self.timeout)
+        if self._tunnel_host:
+            self.sock = sock
+            self._tunnel()
+            sock = self.sock
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+def _fetch(url: str) -> bytes:
+    """Fetch an image over http/https with an SSRF guard enforced on the initial
+    URL AND re-enforced on every redirect hop, connecting only to the validated,
+    pinned address. Follows at most `_MAX_REDIRECTS` redirects and reads at most
+    `_MAX_BYTES` — so a public URL that 3xx-redirects to an internal/metadata
+    address is blocked at the hop, not followed.
+    """
+    current = url
+    for _ in range(_MAX_REDIRECTS + 1):
+        scheme, host, port, ip = _validate_url(current)
+        if scheme == "https":
+            conn = _PinnedHTTPSConnection(
+                host, ip, port=port, timeout=_FETCH_TIMEOUT,
+                context=ssl.create_default_context(),
+            )
+        else:
+            conn = _PinnedHTTPConnection(host, ip, port=port, timeout=_FETCH_TIMEOUT)
+        try:
+            parsed = urlparse(current)
+            path = parsed.path or "/"
+            if parsed.query:
+                path += "?" + parsed.query
+            conn.request("GET", path, headers={"User-Agent": "axiom-ocr-tools/0.1"})
+            resp = conn.getresponse()
+            if resp.status in (301, 302, 303, 307, 308):
+                loc = resp.getheader("Location")
+                resp.read()
+                if not loc:
+                    raise OcrError("redirect without a Location header")
+                current = urljoin(current, loc)
+                continue
+            if resp.status != 200:
+                raise OcrError(f"fetch failed with HTTP {resp.status}")
             raw = resp.read(_MAX_BYTES + 1)
-    except OcrError:
-        raise
-    except Exception as exc:  # network / HTTP error -> structured failure
-        raise OcrError(f"failed to fetch url: {type(exc).__name__}")
-    if len(raw) > _MAX_BYTES:
-        raise OcrError("fetched image exceeds 20 MB limit")
-    return raw
+        except OcrError:
+            raise
+        except Exception as exc:  # network / TLS / HTTP error -> structured failure
+            raise OcrError(f"failed to fetch url: {type(exc).__name__}")
+        finally:
+            conn.close()
+        if len(raw) > _MAX_BYTES:
+            raise OcrError("fetched image exceeds 20 MB limit")
+        return raw
+    raise OcrError("too many redirects")
 
 
 def _raw_bytes(image) -> bytes:

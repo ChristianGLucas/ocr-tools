@@ -2,6 +2,36 @@ import pytest
 
 from gen.messages_pb2 import Image, OcrResult
 from nodes.recognize import recognize
+from nodes._ocr import _validate_url, OcrError
+
+
+def test_validate_url_allows_public_numeric_ip():
+    # A public address validates and is pinned (no DNS needed for a numeric IP).
+    scheme, host, port, ip = _validate_url("http://8.8.8.8/image.png")
+    assert scheme == "http"
+    assert host == "8.8.8.8"
+    assert port == 80
+    assert ip == "8.8.8.8"
+
+
+@pytest.mark.parametrize(
+    "url,msg",
+    [
+        ("http://169.254.169.254/latest/meta-data/", "non-public"),  # cloud metadata
+        ("http://127.0.0.1/", "non-public"),  # loopback
+        ("http://10.0.0.5/x.png", "non-public"),  # private
+        ("http://[::1]/", "non-public"),  # IPv6 loopback
+        ("http://192.168.1.1/", "non-public"),  # private
+        ("file:///etc/passwd", "http"),  # non-http scheme
+        ("ftp://8.8.8.8/x", "http"),  # non-http scheme
+    ],
+)
+def test_validate_url_blocks_disallowed(url, msg):
+    # _validate_url is re-run on the initial URL AND every redirect hop, so this
+    # is the guard that also blocks a public URL redirecting to an internal one.
+    with pytest.raises(OcrError) as exc:
+        _validate_url(url)
+    assert msg in str(exc.value)
 
 
 def test_recognize_reads_known_text(ax, fixture_bytes):
