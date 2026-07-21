@@ -53,11 +53,20 @@ class OcrError(Exception):
     field on their output message rather than letting it propagate as a crash."""
 
 
-_ENGINE = None
+# Build the engine EAGERLY at import (i.e. at pod boot), not lazily on the first
+# request. Loading the three ONNX models takes a second or two; doing it during
+# module import keeps it off the request path, so the first real invocation is
+# already warm and does not risk the (short) invocation deadline on a cold start.
+# Guarded so an unexpected load failure defers to first use rather than breaking
+# import (which would also break `axiom validate`/tooling).
+try:
+    _ENGINE = RapidOCR()
+except Exception:  # pragma: no cover - defensive; model load is exercised in tests
+    _ENGINE = None
 
 
 def _engine() -> RapidOCR:
-    """Return the process-wide RapidOCR engine, building it once on first use."""
+    """Return the process-wide RapidOCR engine (built once, eagerly at import)."""
     global _ENGINE
     if _ENGINE is None:
         _ENGINE = RapidOCR()

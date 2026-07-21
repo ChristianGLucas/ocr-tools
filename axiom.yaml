@@ -1,5 +1,5 @@
 name: christiangeorgelucas/ocr-tools
-version: 0.1.1
+version: 0.1.2
 language: python
 description: Composable Axiom optical character recognition nodes (full recognition with per-line boxes + confidence, plain-text extraction, detection-only region finding) over a single Image envelope shared with image-tools, wrapping the vendored Apache-2.0 RapidOCR / PP-OCRv4 ONNX engine. Offline (models bundled, no network), deterministic, headless, with hard size bounds and an SSRF-guarded URL fetch on untrusted input.
 nodes:
