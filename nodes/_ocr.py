@@ -13,6 +13,7 @@ invocation remains a pure function of its input.
 import http.client
 import io
 import ipaddress
+import math
 import os
 import socket
 import ssl
@@ -374,8 +375,13 @@ def recognize_region(data: bytes, url: str, region) -> dict:
     caller-supplied box instead of a detected one.
 
     Returns a dict: text, confidence. Raises OcrError on a degenerate region
-    (zero area after clamping) or an unresolvable/undecodable image.
+    (zero area after clamping), a non-finite coordinate (NaN/Infinity — legal
+    proto3-JSON encodings of a `double`, so a well-behaved-but-imperfect
+    caller can send them), or an unresolvable/undecodable image.
     """
+    coords = (region.x0, region.y0, region.x1, region.y1)
+    if not all(math.isfinite(v) for v in coords):
+        raise OcrError("region coordinates must be finite numbers")
     arr = load_rgb(_ImageLike(data, url))
     h, w = arr.shape[:2]
     x0 = max(0, min(int(round(region.x0)), w))

@@ -64,6 +64,28 @@ def test_recognize_region_degenerate_region_returns_error(ax, fixture_bytes):
     assert result.text == ""
 
 
+@pytest.mark.parametrize(
+    "bad_region",
+    [
+        Region(x0=float("nan"), y0=0, x1=100, y1=100),
+        Region(x0=0, y0=0, x1=float("inf"), y1=100),
+        Region(x0=0, y0=float("-inf"), x1=100, y1=100),
+    ],
+)
+def test_recognize_region_non_finite_coords_return_error(ax, fixture_bytes, bad_region):
+    # REGRESSION (adversarial review finding): NaN/Infinity are legal
+    # proto3-JSON encodings of a `double` field, so a well-behaved-but-
+    # imperfect caller can send them over the JSON<->protobuf bridge. Must
+    # return the documented structured error, not raise ValueError/
+    # OverflowError out of int(round(...)).
+    data = fixture_bytes("receipt.png")
+    result = recognize_region(ax, RecognizeRegionInput(data=data, region=bad_region))
+    assert isinstance(result, RegionText)
+    assert result.error != ""
+    assert "finite" in result.error
+    assert result.text == ""
+
+
 def test_recognize_region_inverted_region_returns_error(ax, fixture_bytes):
     data = fixture_bytes("receipt.png")
     inverted = Region(x0=200, y0=100, x1=50, y1=150)  # x1 < x0
