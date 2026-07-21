@@ -96,3 +96,68 @@ message RegionsOut {
   // Structured error message; empty on success.
   string error = 3;
 }
+
+// Output of CorrectOrientation. NOTE ON COMPOSABILITY: this deliberately
+// mirrors christiangeorgelucas/image-tools' `Image` fields (data/format/
+// width/height) by NAME rather than embedding the imported `Image` type,
+// because `axiom generate` does not currently resolve a cross-package
+// message type nested inside a new local message (only bare top-level node
+// input/output types resolve — see the 3 existing nodes). A flow edge into
+// an image-tools node is a plain 4-field map (data/format/width/height),
+// same as any other adapter. Ticket filed against the platform gap.
+message OrientationResult {
+  // Image bytes, rotated 180° if upside-down text was detected; otherwise
+  // byte-identical to the input. Re-encoded in `format`.
+  bytes data = 1;
+  // Encoding of `data`: one of "PNG", "JPEG", "WEBP", "GIF", "BMP", "TIFF" —
+  // the input's own format when detectable, else "PNG".
+  string format = 2;
+  // Width in pixels of the (possibly rotated) image. 180° rotation never
+  // changes width/height, so this always equals the input's width.
+  int32 width = 3;
+  // Height in pixels of the (possibly rotated) image.
+  int32 height = 4;
+  // True if the angle classifier detected upside-down (180°) text and
+  // `data` was rotated to correct it; false if the image was already
+  // right-side up (or had no text confident enough to judge).
+  bool rotated = 5;
+  // The angle classifier's confidence in its chosen label, in [0, 1].
+  double confidence = 6;
+  // Structured error message; empty on success.
+  string error = 7;
+}
+
+// Input for RecognizeRegion: a caller-specified rectangular region of an
+// image to crop and recognize, skipping detection entirely. Pairs naturally
+// with DetectRegions' output (feed a returned `Region` straight back in) or
+// any externally known field position (e.g. a fixed form field). Mirrors
+// image-tools' `Image` fields by name for the same reason as
+// `OrientationResult` above (embedding the imported type is not yet
+// supported for nested composition).
+message RecognizeRegionInput {
+  // Raw bytes of the full image to crop from (base64 over JSON). Same
+  // convention as christiangeorgelucas/image-tools' `Image.data`.
+  bytes data = 1;
+  // Encoding of `data`. Optional; auto-detected from the bytes if empty.
+  string format = 2;
+  // INPUT-ONLY. If `data` is empty, the image is fetched from this URL
+  // (SSRF-guarded, same bound as every other ocr-tools node).
+  string url = 3;
+  // The rectangle to crop, in the same pixel/top-left convention as
+  // `Region`. Only the axis-aligned box (x0/y0/x1/y1) is used; `quad`, if
+  // set, is ignored — rotation within the crop is handled by the
+  // recognizer's own angle classifier, not by a perspective warp of the
+  // crop. The rectangle is clamped to the image bounds.
+  Region region = 4;
+}
+
+// Recognition result for a single caller-specified region (no geometry
+// echoed back, since the caller already supplied it).
+message RegionText {
+  // The recognized text of the region. Empty if no text was found.
+  string text = 1;
+  // Recognition confidence in [0, 1]; 0 when no text was found.
+  double confidence = 2;
+  // Structured error message; empty on success.
+  string error = 3;
+}

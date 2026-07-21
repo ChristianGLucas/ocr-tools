@@ -19,6 +19,7 @@ import ssl
 import sys
 from urllib.parse import urljoin, urlparse
 
+import cv2
 import numpy as np
 from PIL import Image as PILImage
 
@@ -210,14 +211,20 @@ def _raw_bytes(image) -> bytes:
     raise OcrError("image has neither `data` nor `url`")
 
 
-def load_rgb(image) -> np.ndarray:
-    """Resolve and decode an `Image` envelope into an (H, W, 3) uint8 RGB array.
+# Formats the `Image` envelope (and its field-flattened siblings below) may
+# declare/return, matching image-tools' documented convention exactly.
+_VALID_FORMATS = {"PNG", "JPEG", "WEBP", "GIF", "BMP", "TIFF"}
 
-    Enforces the byte cap on the encoded input and the pixel cap on the
-    header-declared dimensions BEFORE decoding, so a small 'bomb' image with
-    huge declared dimensions is rejected without allocating its pixels.
+
+def _decode(raw: bytes):
+    """Decode raw encoded image bytes into an (H, W, 3) uint8 RGB array plus
+    the detected source format (one of `_VALID_FORMATS`, defaulting to "PNG"
+    when undetected/unrecognized).
+
+    Enforces the pixel cap on the header-declared dimensions BEFORE decoding
+    pixels, so a small 'bomb' image with huge declared dimensions is rejected
+    without allocating its pixel buffer.
     """
-    raw = _raw_bytes(image)
     try:
         pil = PILImage.open(io.BytesIO(raw))
     except Exception:
@@ -227,6 +234,9 @@ def load_rgb(image) -> np.ndarray:
         raise OcrError("image has zero dimension")
     if w * h > _MAX_PIXELS:
         raise OcrError("image exceeds 40 megapixel limit")
+    fmt = (pil.format or "PNG").upper()
+    if fmt not in _VALID_FORMATS:
+        fmt = "PNG"
     try:
         pil = pil.convert("RGB")
         arr = np.asarray(pil, dtype=np.uint8)
@@ -234,7 +244,34 @@ def load_rgb(image) -> np.ndarray:
         raise OcrError("input is not a decodable image")
     if arr.ndim != 3 or arr.shape[2] != 3:
         raise OcrError("input is not a decodable image")
+    return arr, fmt
+
+
+def load_rgb(image) -> np.ndarray:
+    """Resolve and decode an `Image` envelope into an (H, W, 3) uint8 RGB array.
+
+    Enforces the byte cap on the encoded input and the pixel cap on the
+    header-declared dimensions BEFORE decoding, so a small 'bomb' image with
+    huge declared dimensions is rejected without allocating its pixels.
+    """
+    arr, _fmt = _decode(_raw_bytes(image))
     return arr
+
+
+def load_rgb_and_format(image):
+    """Like `load_rgb`, but also returns the detected source format — needed
+    by nodes (CorrectOrientation) that must re-encode and return image bytes,
+    so the output is encoded in the same format the caller sent."""
+    return _decode(_raw_bytes(image))
+
+
+def encode_rgb(arr: np.ndarray, fmt: str) -> bytes:
+    """Encode an (H, W, 3) uint8 RGB array back to bytes in `fmt` (one of
+    `_VALID_FORMATS`)."""
+    pil = PILImage.fromarray(arr, mode="RGB")
+    buf = io.BytesIO()
+    pil.save(buf, format=fmt)
+    return buf.getvalue()
 
 
 def _quad_and_bbox(box):
@@ -291,3 +328,78 @@ def detect_regions(image) -> list:
             quad, x0, y0, x1, y1 = _quad_and_bbox(box)
             regions.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "quad": quad})
     return regions
+
+
+def correct_orientation(image) -> dict:
+    """Classify whether the image is upside-down (0° vs 180°) using PP-OCRv4's
+    angle-classification model (`RapidOCR.text_cls`, the same component the
+    full pipeline runs before recognition) and, if so, rotate it 180° to
+    correct it.
+
+    We call `text_cls` directly (rather than the top-level `RapidOCR.__call__`
+    with only `use_cls=True`) because the top-level wrapper discards the
+    rotated pixels when detection is disabled — it only returns the label; the
+    submodule is the documented way to get the corrected image back.
+
+    Returns a dict: data (re-encoded bytes), format, width, height, rotated
+    (bool), confidence (float in [0, 1]).
+    """
+    arr, fmt = load_rgb_and_format(image)
+    engine = _engine()
+    preprocessed, _ratio_h, _ratio_w = engine.preprocess(arr)
+    _, cls_res, _ = engine.text_cls(preprocessed)
+    label, score = cls_res[0]
+    score = float(score)
+    # Same decision rule PP-OCRv4's own pipeline applies internally
+    # (ch_ppocr_cls/text_cls.py): only act on a confident "180" verdict.
+    rotated = ("180" in str(label)) and (score > engine.text_cls.cls_thresh)
+    out_arr = cv2.rotate(arr, cv2.ROTATE_180) if rotated else arr
+    h, w = out_arr.shape[:2]
+    return {
+        "data": encode_rgb(out_arr, fmt),
+        "format": fmt,
+        "width": w,
+        "height": h,
+        "rotated": rotated,
+        "confidence": score,
+    }
+
+
+def recognize_region(data: bytes, url: str, region) -> dict:
+    """Crop `region` (an axis-aligned x0/y0/x1/y1 rectangle, clamped to the
+    image bounds) out of the image resolved from (data, url) and run
+    classification + recognition on just that crop, skipping detection
+    entirely (`use_det=False`) — the same per-box pipeline stage the full
+    Recognize pipeline runs on each detected box, applied here to a
+    caller-supplied box instead of a detected one.
+
+    Returns a dict: text, confidence. Raises OcrError on a degenerate region
+    (zero area after clamping) or an unresolvable/undecodable image.
+    """
+    arr = load_rgb(_ImageLike(data, url))
+    h, w = arr.shape[:2]
+    x0 = max(0, min(int(round(region.x0)), w))
+    y0 = max(0, min(int(round(region.y0)), h))
+    x1 = max(0, min(int(round(region.x1)), w))
+    y1 = max(0, min(int(round(region.y1)), h))
+    if x1 <= x0 or y1 <= y0:
+        raise OcrError("region has zero area after clamping to the image bounds")
+    crop = np.ascontiguousarray(arr[y0:y1, x0:x1])
+    out = _engine()(crop, use_det=False, use_cls=True, use_rec=True)
+    rec_res = out[0] if isinstance(out, tuple) else out
+    if not rec_res:
+        return {"text": "", "confidence": 0.0}
+    text, score = rec_res[0][0], rec_res[0][1]
+    return {"text": str(text), "confidence": float(score)}
+
+
+class _ImageLike:
+    """Minimal (data, url) pair matching the shape `_raw_bytes`/`load_rgb`
+    expect — lets `recognize_region` reuse them without a proto `Image`
+    wrapper, since `RecognizeRegionInput` carries `data`/`url` as its own
+    top-level fields (see messages.proto for why they're flattened rather
+    than a nested `Image`)."""
+
+    def __init__(self, data: bytes, url: str):
+        self.data = data
+        self.url = url
