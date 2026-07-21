@@ -4,14 +4,19 @@ language: python
 description: Composable Axiom optical character recognition nodes (full recognition with per-line boxes + confidence, plain-text extraction, detection-only region finding) over a single Image envelope shared with image-tools, wrapping the vendored Apache-2.0 RapidOCR / PP-OCRv4 ONNX engine. Offline (models bundled, no network), deterministic, headless, with hard size bounds and an SSRF-guarded URL fetch on untrusted input.
 nodes:
     - name: Recognize
+      description: Detect and recognize all text in an image, returning the full concatenated text plus, for every line, its recognized string, recognition confidence in [0,1], axis-aligned bounding box (pixels, top-left origin), and the raw detection quadrilateral that preserves rotated or skewed text. Also returns the mean confidence and line count. Malformed, oversized (>20 MB or >40 megapixels), or unfetchable input returns a structured error rather than crashing. Wraps the Apache-2.0 RapidOCR / PP-OCRv4 detection+recognition pipeline.
       input: Image
       output: OcrResult
-      description: Detect and recognize all text in an image, returning the full concatenated text plus, for every line, its recognized string, recognition confidence in [0,1], axis-aligned bounding box (pixels, top-left origin), and the raw detection quadrilateral that preserves rotated or skewed text. Also returns the mean confidence and line count. Malformed, oversized (>20 MB or >40 megapixels), or unfetchable input returns a structured error rather than crashing. Wraps the Apache-2.0 RapidOCR / PP-OCRv4 detection+recognition pipeline.
     - name: ExtractText
+      description: Recognize all text in an image and return it as a single plain string, lines joined in reading order by newlines — a clean edge into text or NLP nodes downstream. Returns no geometry or confidence (use Recognize for those). Malformed, oversized, or unfetchable input returns a structured error rather than crashing. Wraps the Apache-2.0 RapidOCR / PP-OCRv4 engine.
       input: Image
       output: TextOut
-      description: Recognize all text in an image and return it as a single plain string, lines joined in reading order by newlines — a clean edge into text or NLP nodes downstream. Returns no geometry or confidence (use Recognize for those). Malformed, oversized, or unfetchable input returns a structured error rather than crashing. Wraps the Apache-2.0 RapidOCR / PP-OCRv4 engine.
     - name: DetectRegions
+      description: Locate text regions in an image without recognizing their contents — a fast "where is the text" pass for layout analysis, cropping, or routing. Each region carries its axis-aligned bounding box (pixels, top-left origin) and the raw detection quadrilateral, plus a total count. Malformed, oversized, or unfetchable input returns a structured error rather than crashing. Wraps the detection stage of the Apache-2.0 RapidOCR / PP-OCRv4 engine.
       input: Image
       output: RegionsOut
-      description: Locate text regions in an image without recognizing their contents — a fast "where is the text" pass for layout analysis, cropping, or routing. Each region carries its axis-aligned bounding box (pixels, top-left origin) and the raw detection quadrilateral, plus a total count. Malformed, oversized, or unfetchable input returns a structured error rather than crashing. Wraps the detection stage of the Apache-2.0 RapidOCR / PP-OCRv4 engine.
+imports:
+    - package: christiangeorgelucas/image-tools
+      version: 0.1.0
+      messages:
+        - Image

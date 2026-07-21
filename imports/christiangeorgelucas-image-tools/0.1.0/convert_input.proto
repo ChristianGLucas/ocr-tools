@@ -1,0 +1,85 @@
+// Data contracts for christiangeorgelucas/image-tools.
+//
+// The design is built around ONE canonical message — `Image` — that every node
+// both emits and consumes. That makes flows compose with near-trivial adapters:
+// the edge between any two nodes is a single-field map (upstream `Image` ->
+// downstream `.image`). Other image packages can `axiom import` this package and
+// speak the same `Image` envelope, so they drop into the same flows.
+
+syntax = "proto3";
+
+package christiangeorgelucas.image_tools;
+
+// The canonical in-flight image. Every node returns this, and every node's input
+// carries it. On output, `data`, `format`, `width`, and `height` are always
+// populated. `url` is input-only: when `data` is empty and `url` is set, a node
+// fetches the image from that URL first — so any node can start a flow (given a
+// URL) or sit in the middle (receiving `data` from upstream).
+message Image {
+  // Raw image bytes (base64-encoded over the JSON bridge). Always set on output.
+  bytes data = 1;
+  // Encoding of `data`: one of "PNG", "JPEG", "WEBP", "GIF", "BMP", "TIFF".
+  string format = 2;
+  // Image width in pixels. Populated on output.
+  int32 width = 3;
+  // Image height in pixels. Populated on output.
+  int32 height = 4;
+  // INPUT-ONLY. If `data` is empty, the node fetches the image from this URL.
+  string url = 5;
+}
+
+// Input for the Resize node.
+message ResizeInput {
+  // The image to resize (inline `data` or a `url` to fetch).
+  Image image = 1;
+  // Target width in pixels. If 0 and keep_aspect is true, it is derived from height.
+  int32 width = 2;
+  // Target height in pixels. If 0 and keep_aspect is true, it is derived from width.
+  int32 height = 3;
+  // When true, preserve the aspect ratio, fitting within (width, height).
+  bool keep_aspect = 4;
+}
+
+// Input for the Crop node. Crops the axis-aligned rectangle at (x, y) of the
+// given width and height. The rectangle is clamped to the image bounds.
+message CropInput {
+  // The image to crop (inline `data` or a `url` to fetch).
+  Image image = 1;
+  // Left offset of the crop rectangle, in pixels from the left edge.
+  int32 x = 2;
+  // Top offset of the crop rectangle, in pixels from the top edge.
+  int32 y = 3;
+  // Width of the crop rectangle in pixels.
+  int32 width = 4;
+  // Height of the crop rectangle in pixels.
+  int32 height = 5;
+}
+
+// Input for the Rotate node.
+message RotateInput {
+  // The image to rotate (inline `data` or a `url` to fetch).
+  Image image = 1;
+  // Rotation in degrees counter-clockwise.
+  double degrees = 2;
+  // When true, expand the canvas so the whole rotated image fits (no clipping).
+  bool expand = 3;
+}
+
+// Input for the Thumbnail node. Scales the image down to fit within a
+// `max_size` x `max_size` box, preserving aspect ratio. Never upscales.
+message ThumbnailInput {
+  // The image to shrink (inline `data` or a `url` to fetch).
+  Image image = 1;
+  // Longest-edge bound in pixels. The result fits within max_size x max_size.
+  int32 max_size = 2;
+}
+
+// Input for the Convert node. Re-encodes the image to another format.
+message ConvertInput {
+  // The image to re-encode (inline `data` or a `url` to fetch).
+  Image image = 1;
+  // Target format: "PNG", "JPEG", "WEBP", "GIF", "BMP", or "TIFF".
+  string format = 2;
+  // Encoder quality 1-100 for lossy formats (JPEG/WEBP). 0 uses a sane default.
+  int32 quality = 3;
+}

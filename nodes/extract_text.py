@@ -1,4 +1,5 @@
-from gen.messages_pb2 import Image, TextOut
+from gen.messages_pb2 import TextOut
+from gen.christiangeorgelucas_image_tools_messages_pb2 import Image
 from gen.axiom_context import AxiomContext
 from nodes._ocr import recognize as _recognize, OcrError
 

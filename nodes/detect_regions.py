@@ -1,4 +1,5 @@
-from gen.messages_pb2 import Image, RegionsOut, Region, Point
+from gen.messages_pb2 import RegionsOut, Region, Point
+from gen.christiangeorgelucas_image_tools_messages_pb2 import Image
 from gen.axiom_context import AxiomContext
 from nodes._ocr import detect_regions as _detect_regions, OcrError
 

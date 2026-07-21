@@ -1,13 +1,15 @@
 // Data contracts for christiangeorgelucas/ocr-tools — stateless optical
 // character recognition wrapping the Apache-2.0 RapidOCR / PP-OCRv4 ONNX engine.
 //
-// COMPOSABILITY. Every node consumes the single canonical `Image` envelope,
-// which is structurally identical to christiangeorgelucas/image-tools' `Image`
-// (same fields, same numbers, same INPUT-ONLY `url`). That makes an image-tools
-// node's `Image` output map field-for-field onto an ocr-tools node's input, so
-// image preprocessing (Load / Convert / Resize) flows straight into OCR.
+// COMPOSABILITY. Every node consumes the SAME `Image` envelope that
+// christiangeorgelucas/image-tools defines — imported directly (see `imports:`
+// in axiom.yaml), not re-declared — so an image-tools node's `Image` output
+// flows straight into an ocr-tools node with no adapter, and both packages'
+// nodes share one type in a compiled flow. That envelope carries raw `data`
+// bytes (base64 over JSON) or, when `data` is empty, an INPUT-ONLY `url` the
+// node fetches (SSRF-guarded, capped at 20 MB before decode).
 //
-// COORDINATES. All bounding boxes are in PIXELS with the origin at the
+// COORDINATES. All bounding boxes below are in PIXELS with the origin at the
 // TOP-LEFT of the image (the raster convention RapidOCR uses). Note this
 // differs from christiangeorgelucas/pdf-tools, whose boxes are in PDF points
 // with the origin BOTTOM-LEFT — deliberately not homogenized, because the two
@@ -16,26 +18,6 @@
 syntax = "proto3";
 
 package christiangeorgelucas.ocr_tools;
-
-// The canonical input image. Provide either inline `data` (raw encoded image
-// bytes) or, when `data` is empty, a `url` to fetch. `format`, `width`, and
-// `height` are optional informational hints and are ignored by decoding — the
-// image format and dimensions are read from the bytes themselves.
-message Image {
-  // Raw image bytes (base64-encoded over the JSON bridge). PNG/JPEG/BMP/TIFF/
-  // WEBP/GIF are decoded. Hard cap of 20 MB applies before decoding.
-  bytes data = 1;
-  // Informational encoding hint (e.g. "PNG"). Not required; ignored by decode.
-  string format = 2;
-  // Informational width hint in pixels. Not required; ignored by decode.
-  int32 width = 3;
-  // Informational height hint in pixels. Not required; ignored by decode.
-  int32 height = 4;
-  // INPUT-ONLY. When `data` is empty, the node fetches the image from this
-  // http/https URL. The fetch is SSRF-guarded (public hosts only) and capped
-  // at 20 MB.
-  string url = 5;
-}
 
 // A point in pixel coordinates, origin top-left.
 message Point {

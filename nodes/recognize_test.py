@@ -1,6 +1,7 @@
 import pytest
 
-from gen.messages_pb2 import Image, OcrResult
+from gen.messages_pb2 import OcrResult
+from gen.christiangeorgelucas_image_tools_messages_pb2 import Image
 from nodes.recognize import recognize
 from nodes._ocr import _validate_url, OcrError
 

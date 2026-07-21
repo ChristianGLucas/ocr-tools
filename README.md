@@ -11,11 +11,12 @@ Built for the Axiom marketplace under the handle `christiangeorgelucas`.
 
 All three nodes consume the single canonical **`Image`** envelope (raw `data`
 bytes, or an `url` to fetch) and return a purpose-shaped result. The `Image`
-message is structurally identical to
-[`christiangeorgelucas/image-tools`](https://github.com/ChristianGLucas/image-tools)'
-`Image`, so image preprocessing flows straight into OCR
-(`image-tools/Convert → ocr-tools/Recognize`), and OCR text flows on into text
-or PDF-style downstream nodes.
+message is **imported directly** from
+[`christiangeorgelucas/image-tools`](https://github.com/ChristianGLucas/image-tools)
+(it is the same type, not a copy), so image preprocessing composes into OCR with
+no adapter — e.g. `image-tools/Load → ocr-tools/Recognize` — and both packages'
+nodes share one `Image` type inside a compiled flow. OCR text then flows on into
+text or PDF-style downstream nodes.
 
 | Node | Input → Output | What it does |
 |---|---|---|

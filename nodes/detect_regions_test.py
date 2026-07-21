@@ -1,4 +1,5 @@
-from gen.messages_pb2 import Image, RegionsOut
+from gen.messages_pb2 import RegionsOut
+from gen.christiangeorgelucas_image_tools_messages_pb2 import Image
 from nodes.detect_regions import detect_regions
 
 
